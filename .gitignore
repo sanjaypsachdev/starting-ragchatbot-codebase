@@ -2,6 +2,9 @@
 .env
 backend/.env
 
+# Local Claude Code instructions (user-specific, not for sharing)
+CLAUDE.local.md
+
 # Python
 __pycache__/
 *.py[cod]
@@ -10,6 +13,7 @@ __pycache__/
 .Python
 
 # Virtual environments
+.venv/
 venv/
 env/
 ENV/
@@ -19,6 +23,17 @@ backend/chroma_db/
 
 # Uploads
 uploads/
+
+# Testing
+.pytest_cache/
+
+# Playwright MCP browser state
+.playwright-mcp/
+
+# Screenshots / images
+*.png
+*.jpg
+*.jpeg
 
 # IDE
 .vscode/
