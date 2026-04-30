@@ -1,11 +1,15 @@
 import sys
 import os
 from unittest.mock import MagicMock
+from typing import List, Optional
 
 # Add backend/ to path so tests can import backend modules directly
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
 from vector_store import SearchResults, VectorStore
 from search_tools import ToolManager
 
@@ -100,3 +104,77 @@ def make_text_block():
 @pytest.fixture
 def make_tool_use_block():
     return _make_tool_use_block
+
+
+# ---------------------------------------------------------------------------
+# API test fixtures
+# ---------------------------------------------------------------------------
+
+class _QueryRequest(BaseModel):
+    query: str
+    session_id: Optional[str] = None
+
+
+class _QueryResponse(BaseModel):
+    answer: str
+    sources: List[dict]
+    session_id: str
+
+
+class _CourseStats(BaseModel):
+    total_courses: int
+    course_titles: List[str]
+
+
+@pytest.fixture
+def mock_rag_system():
+    """MagicMock of RAGSystem with realistic default return values."""
+    rag = MagicMock()
+    rag.query.return_value = (
+        "Here is the answer.",
+        [{"label": "Intro to Claude - Lesson 1", "url": "https://example.com/lesson/1"}],
+    )
+    rag.get_course_analytics.return_value = {
+        "total_courses": 2,
+        "course_titles": ["Intro to Claude", "Advanced Prompting"],
+    }
+    rag.session_manager.create_session.return_value = "session-generated"
+    rag.session_manager.sessions = {}
+    return rag
+
+
+@pytest.fixture
+def client(mock_rag_system):
+    """TestClient wired to a minimal FastAPI app that mirrors app.py's API routes.
+
+    Defined inline to avoid the static-file mount in app.py that requires
+    ../frontend to exist on disk.
+    """
+    test_app = FastAPI()
+
+    @test_app.post("/api/query", response_model=_QueryResponse)
+    async def query_documents(request: _QueryRequest):
+        try:
+            session_id = request.session_id or mock_rag_system.session_manager.create_session()
+            answer, sources = mock_rag_system.query(request.query, session_id)
+            return _QueryResponse(answer=answer, sources=sources, session_id=session_id)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @test_app.get("/api/courses", response_model=_CourseStats)
+    async def get_course_stats():
+        try:
+            analytics = mock_rag_system.get_course_analytics()
+            return _CourseStats(
+                total_courses=analytics["total_courses"],
+                course_titles=analytics["course_titles"],
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @test_app.delete("/api/session/{session_id}")
+    async def delete_session(session_id: str):
+        mock_rag_system.session_manager.sessions.pop(session_id, None)
+        return {"deleted": True}
+
+    return TestClient(test_app)
